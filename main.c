@@ -17,7 +17,7 @@
 #include <linux/kd.h>
 #include <linux/fb.h>
 
-#define EVDEV_MOUSE_NAME "/dev/input/event0"
+#define EVDEV_MOUSE_NAME "/dev/input/event2"
 #define TTY_DEVICE_NAME "/dev/tty0"
 
 static int s_vt_fd = -1;
