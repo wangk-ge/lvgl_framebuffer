@@ -4,6 +4,8 @@
 #include "lv_examples/lv_examples.h"
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
 #include <signal.h>
 #include <time.h>
 #include <sys/time.h>
@@ -15,7 +17,12 @@
 #include <linux/kd.h>
 #include <linux/fb.h>
 
-static int g_vt_fd = -1;
+#define EVDEV_MOUSE_NAME "/dev/input/event0"
+#define TTY_DEVICE_NAME "/dev/tty0"
+
+static int s_vt_fd = -1;
+static lv_color_t* s_buf1 = NULL;
+static lv_color_t* s_buf2 = NULL;
 
 /**
  * Print the memory usage periodically
@@ -38,41 +45,52 @@ static void memory_monitor(lv_task_t *param)
  */
 static void hal_init(void)
 {
-	if (!access("/dev/tty0", F_OK))
+	if (!access(TTY_DEVICE_NAME, F_OK))
 	{
-		int fd = open("/dev/tty0", O_RDWR | O_SYNC);
+		int fd = open(TTY_DEVICE_NAME, O_RDWR | O_SYNC);
 		if(fd < 0)
 		{
-			printf("open /dev/tty0 faield!\n");
+			printf("open %s faield!\n", TTY_DEVICE_NAME);
 			return;
 		}
 
 		if(ioctl(fd, KDSETMODE, (void*) KD_GRAPHICS))
 		{
-			printf("set /dev/tty0 graphics mode faield!\n");
+			printf("set %s to graphics mode faield!\n", TTY_DEVICE_NAME);
 			close(fd);
 			return;
 		}
 		
-		g_vt_fd = fd;
+		s_vt_fd = fd;
 	}
 
 	/* Use the 'fbdev' driver */
 	fbdev_init();
 	
+	uint32_t disp_width = LV_HOR_RES_MAX; 
+	uint32_t disp_height = LV_VER_RES_MAX;
+	fbdev_get_sizes(&disp_width, &disp_height);
+	
+	uint32_t size_in_px_cnt = disp_width * disp_height;
+	s_buf1 = (lv_color_t*)malloc(size_in_px_cnt * sizeof(lv_color_t));
+	assert(s_buf1);
+	s_buf2 = (lv_color_t*)malloc(size_in_px_cnt * sizeof(lv_color_t));
+	assert(s_buf2);
+	
 	/*Create a display buffer*/
-	static lv_disp_buf_t disp_buf1;
-	static lv_color_t buf1_1[LV_HOR_RES_MAX * LV_VER_RES_MAX];
-	lv_disp_buf_init(&disp_buf1, buf1_1, NULL, LV_HOR_RES_MAX * LV_VER_RES_MAX);
+	static lv_disp_buf_t disp_buf;
+	lv_disp_buf_init(&disp_buf, s_buf1, s_buf2, size_in_px_cnt);
 
 	/*Create a display*/
 	lv_disp_drv_t disp_drv;
 	lv_disp_drv_init(&disp_drv);
-	disp_drv.buffer = &disp_buf1;
+	disp_drv.buffer = &disp_buf;
+	disp_drv.hor_res = disp_width;
+    	disp_drv.ver_res = disp_height;
 	disp_drv.flush_cb = fbdev_flush;
 	lv_disp_drv_register(&disp_drv);
 
-	evdev_mouse_set_file("/dev/input/event2");
+	evdev_mouse_set_file(EVDEV_MOUSE_NAME);
 	lv_indev_drv_t indev_drv;
 	lv_indev_drv_init(&indev_drv);
 	indev_drv.type = LV_INDEV_TYPE_POINTER;
@@ -80,7 +98,7 @@ static void hal_init(void)
 	lv_indev_t *mouse_indev = lv_indev_drv_register(&indev_drv);
 	
 	/*Set a cursor for the mouse*/
-#if 0
+#if 1
 	LV_IMG_DECLARE(mouse_cursor_icon); /*Declare the image file.*/
 	lv_obj_t * cursor_obj = lv_img_create(lv_scr_act(), NULL); /*Create an image object for the cursor */
 	lv_img_set_src(cursor_obj, &mouse_cursor_icon);           /*Set the image source*/
@@ -131,21 +149,24 @@ int main(void)
 		/* Periodically call the lv_task handler.
      		 * It could be done in a timer interrupt or an OS task too.*/
 		lv_task_handler();
-		//printf("lv_task_handler\n");
 		
-		usleep(1 * 1000);
-		//printf("usleep\n");
+		usleep(5 * 1000);
 	}
 	
-	if (g_vt_fd != -1)
+	if (s_vt_fd != -1)
 	{
-		if (ioctl(g_vt_fd, KDSETMODE, KD_TEXT) < 0)
+		if (ioctl(s_vt_fd, KDSETMODE, KD_TEXT) < 0)
 		{
 		    perror("KDSETMODE");
 		}
-		close(g_vt_fd);
-		g_vt_fd = -1;
+		close(s_vt_fd);
+		s_vt_fd = -1;
         }
+        
+        free(s_buf1);
+        s_buf1 = NULL;
+        free(s_buf2);
+        s_buf2 = NULL;
 
 	return 0;
 }
