@@ -15,7 +15,7 @@ WARNINGS ?= -Werror -Wall -Wextra \
 CFLAGS ?= -O3 -g0 -I$(LVGL_DIR)/ $(WARNINGS)
 #CFLAGS ?= -g -I$(LVGL_DIR)/ $(WARNINGS)
 #LDFLAGS += -lSDL2 -lm
-BIN = demo
+BIN = lvgl_framebuffer
 
 MAINSRC = $(LVGL_DIR)/main.c
 
@@ -24,6 +24,7 @@ include $(LVGL_DIR)/lv_drivers/lv_drivers.mk
 include $(LVGL_DIR)/lv_examples/lv_examples.mk
 
 CSRCS += $(LVGL_DIR)/mouse_cursor_icon.c
+CSRCS += $(LVGL_DIR)/evdev_mouse.c
 
 OBJEXT ?= .o
 

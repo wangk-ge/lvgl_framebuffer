@@ -1,29 +1,21 @@
 #include "lvgl/lvgl.h"
 #include "lv_drivers/display/fbdev.h"
-#include "lv_drivers/indev/evdev.h"
+#include "evdev_mouse.h"
 #include "lv_examples/lv_examples.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <signal.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <fcntl.h>
 
-void sigroutine(int signo)
-{
-	switch (signo)
-	{
-		case SIGALRM:
-			//printf("Catch a signal -- SIGALRM \n");
-			signal(SIGALRM, sigroutine);
-			
-			//struct timeval start;
-			//gettimeofday(&start, NULL);
-			//printf("time %ld ms\n", start.tv_sec * 1000 + start.tv_usec / 1000);
-			
-			lv_tick_inc(5);
-		break;
-	}
-}
+#include <linux/vt.h>
+#include <linux/kd.h>
+#include <linux/fb.h>
+
+static int g_vt_fd = -1;
 
 /**
  * Print the memory usage periodically
@@ -46,6 +38,25 @@ static void memory_monitor(lv_task_t *param)
  */
 static void hal_init(void)
 {
+	if (!access("/dev/tty0", F_OK))
+	{
+		int fd = open("/dev/tty0", O_RDWR | O_SYNC);
+		if(fd < 0)
+		{
+			printf("open /dev/tty0 faield!\n");
+			return;
+		}
+
+		if(ioctl(fd, KDSETMODE, (void*) KD_GRAPHICS))
+		{
+			printf("set /dev/tty0 graphics mode faield!\n");
+			close(fd);
+			return;
+		}
+		
+		g_vt_fd = fd;
+	}
+
 	/* Use the 'fbdev' driver */
 	fbdev_init();
 	
@@ -61,42 +72,29 @@ static void hal_init(void)
 	disp_drv.flush_cb = fbdev_flush;
 	lv_disp_drv_register(&disp_drv);
 
-#if 1
-	evdev_init();
+	evdev_mouse_set_file("/dev/input/event2");
 	lv_indev_drv_t indev_drv;
 	lv_indev_drv_init(&indev_drv);
 	indev_drv.type = LV_INDEV_TYPE_POINTER;
-	indev_drv.read_cb = evdev_read;
+	indev_drv.read_cb = evdev_mouse_read;
 	lv_indev_t *mouse_indev = lv_indev_drv_register(&indev_drv);
 	
 	/*Set a cursor for the mouse*/
+#if 0
 	LV_IMG_DECLARE(mouse_cursor_icon); /*Declare the image file.*/
 	lv_obj_t * cursor_obj = lv_img_create(lv_scr_act(), NULL); /*Create an image object for the cursor */
 	lv_img_set_src(cursor_obj, &mouse_cursor_icon);           /*Set the image source*/
-	lv_indev_set_cursor(mouse_indev, cursor_obj);             /*Connect the image  object to the driver*/
+#else
+	lv_obj_t * cursor_obj = lv_label_create(lv_scr_act(), NULL);
+	lv_label_set_recolor(cursor_obj, true);
+	lv_label_set_text(cursor_obj, "#ff0000 .cursor");
 #endif
-
-	//lv_indev_t *mouse = lv_indev_next(NULL);
-	//lv_obj_t *cursor = lv_label_create(lv_scr_act(), NULL);
-	//lv_label_set_recolor(cursor, true);
-	//lv_label_set_text(cursor, "#ff0000 .cursor");
-	//lv_indev_set_cursor(mouse, cursor);
+	lv_indev_set_cursor(mouse_indev, cursor_obj);
 	
 	/* Optional:
 	 * Create a memory monitor task which prints the memory usage in
 	 * periodically.*/
 	//lv_task_create(memory_monitor, 5000, LV_TASK_PRIO_MID, NULL);
-	
-	struct itimerval value, ovalue;
-
-	//printf("process id is %d\n", getpid());
-	signal(SIGALRM, sigroutine);
-
-	value.it_value.tv_sec = 0;
-	value.it_value.tv_usec = 5000;
-	value.it_interval.tv_sec = 0;
-	value.it_interval.tv_usec = 5000;
-	setitimer(ITIMER_REAL, &value, &ovalue);
 }
 
 int main(void)
@@ -135,9 +133,39 @@ int main(void)
 		lv_task_handler();
 		//printf("lv_task_handler\n");
 		
-		usleep(5 * 1000);
+		usleep(1 * 1000);
 		//printf("usleep\n");
 	}
+	
+	if (g_vt_fd != -1)
+	{
+		if (ioctl(g_vt_fd, KDSETMODE, KD_TEXT) < 0)
+		{
+		    perror("KDSETMODE");
+		}
+		close(g_vt_fd);
+		g_vt_fd = -1;
+        }
 
 	return 0;
+}
+
+/*Set in lv_conf.h as `LV_TICK_CUSTOM_SYS_TIME_EXPR`*/
+uint32_t custom_tick_get(void)
+{
+    static uint64_t start_ms = 0;
+    if(start_ms == 0)
+    {
+        struct timeval tv_start;
+        gettimeofday(&tv_start, NULL);
+        start_ms = (tv_start.tv_sec * 1000000 + tv_start.tv_usec) / 1000;
+    }
+
+    struct timeval tv_now;
+    gettimeofday(&tv_now, NULL);
+    uint64_t now_ms;
+    now_ms = (tv_now.tv_sec * 1000000 + tv_now.tv_usec) / 1000;
+
+    uint32_t time_ms = now_ms - start_ms;
+    return time_ms;
 }
